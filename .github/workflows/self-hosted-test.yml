@@ -1,0 +1,24 @@
+name: Test Self-Hosted Runner
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  test-runner:
+    runs-on: self-hosted
+    steps:
+      - name: Print runner info
+        run: |
+          echo "Running on:"
+          hostname
+          echo "Current user:"
+          whoami
+          echo "Working directory:"
+          pwd
+
+      - name: Check OS
+        run: uname -a
+
+      - name: List files
+        run: ls -la
