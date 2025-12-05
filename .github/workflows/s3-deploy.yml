@@ -1,9 +1,78 @@
-name: S3 Bucket Deploy (Self-Hosted)
+# name: S3 Bucket Deploy (Self-Hosted)
+
+# on:
+#   push:
+#     branches:
+#       - main  
+
+# permissions:
+#   contents: read
+
+# env:
+#   AWS_REGION: us-east-1
+
+# jobs:
+#   s3-deploy:
+#     runs-on: self-hosted
+
+#     steps:
+#       - name: Checkout repo
+#         uses: actions/checkout@v4
+
+#       - name: Print runner info
+#         run: |
+#           echo "Running on host:"
+#           hostname
+#           echo "Current branch: $GITHUB_REF_NAME"
+#           echo "Using region: $AWS_REGION"
+
+#       - name: Generate unique bucket name
+#         id: bucket
+#         run: |
+#           REPO_SHORT=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | cut -c1-20)
+#           BUCKET="shamlin-${REPO_SHORT}-${GITHUB_RUN_NUMBER}"
+#           echo "bucket_name=$BUCKET" >> $GITHUB_OUTPUT
+      
+
+#       - name: Create S3 bucket
+#         run: |
+#           BUCKET="${{ steps.bucket.outputs.bucket_name }}"
+#           echo "Creating bucket: $BUCKET"
+#           aws s3 mb "s3://$BUCKET" --region "$AWS_REGION"
+
+#       - name: Upload file to S3
+#         run: |
+#           BUCKET="${{ steps.bucket.outputs.bucket_name }}"
+#           FILE_PATH="Jenkinsfile"
+#           echo "Uploading $FILE_PATH to s3://$BUCKET/"
+#           aws s3 cp "$FILE_PATH" "s3://$BUCKET/"
+
+#       - name: List objects in bucket
+#         run: |
+#           BUCKET="${{ steps.bucket.outputs.bucket_name }}"
+#           aws s3 ls "s3://$BUCKET/"
+
+
+
+
+
+
+name: Conditional S3 Bucket Deployment (Self-Hosted)
 
 on:
   push:
     branches:
-      - main  
+      - main
+
+  workflow_dispatch:
+    inputs:
+      bucket_name:
+        description: 'S3 Bucket Name'
+        required: true
+      environment:
+        description: 'Environment (dev/stage/prod)'
+        required: true
+        default: 'dev'
 
 permissions:
   contents: read
@@ -19,35 +88,68 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Print runner info
+      - name: Set Variables
+        id: vars
         run: |
-          echo "Running on host:"
-          hostname
-          echo "Current branch: $GITHUB_REF_NAME"
-          echo "Using region: $AWS_REGION"
+          # Use workflow_dispatch inputs if provided, else generate defaults
+          if [ -z "${{ github.event.inputs.bucket_name }}" ]; then
+            # Auto-generate bucket name (fallback)
+            REPO_SHORT=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | cut -c1-20)
+            BUCKET="shamlin-${REPO_SHORT}-${GITHUB_RUN_NUMBER}"
+          else
+            BUCKET="${{ github.event.inputs.bucket_name }}"
+          fi
 
-      - name: Generate unique bucket name
-        id: bucket
+          # Environment
+          if [ -z "${{ github.event.inputs.environment }}" ]; then
+            ENVIRONMENT="dev"
+          else
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          fi
+
+          echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+
+          echo "Using Bucket: $BUCKET"
+          echo "Using Environment: $ENVIRONMENT"
+
+      - name: Check if bucket exists
+        id: exists
+        continue-on-error: true
         run: |
-          REPO_SHORT=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | cut -c1-20)
-          BUCKET="shamlin-${REPO_SHORT}-${GITHUB_RUN_NUMBER}"
-          echo "bucket_name=$BUCKET" >> $GITHUB_OUTPUT
+          BUCKET="${{ steps.vars.outputs.bucket }}"
+          echo "Checking if bucket $BUCKET exists..."
+          aws s3api head-bucket --bucket "$BUCKET"
       
-
-      - name: Create S3 bucket
+      - name: Create bucket (if not exists)
+        if: steps.exists.outcome == 'failure'
         run: |
-          BUCKET="${{ steps.bucket.outputs.bucket_name }}"
-          echo "Creating bucket: $BUCKET"
+          BUCKET="${{ steps.vars.outputs.bucket }}"
+          echo "Bucket does NOT exist. Creating bucket: $BUCKET"
           aws s3 mb "s3://$BUCKET" --region "$AWS_REGION"
 
-      - name: Upload file to S3
+      - name: Skip create message (if exists)
+        if: steps.exists.outcome == 'success'
         run: |
-          BUCKET="${{ steps.bucket.outputs.bucket_name }}"
-          FILE_PATH="Jenkinsfile"
-          echo "Uploading $FILE_PATH to s3://$BUCKET/"
-          aws s3 cp "$FILE_PATH" "s3://$BUCKET/"
+          BUCKET="${{ steps.vars.outputs.bucket }}"
+          echo "Bucket $BUCKET already exists. Skipping creation."
 
-      - name: List objects in bucket
+      - name: Enable versioning if prod
+        if: steps.vars.outputs.environment == 'prod'
         run: |
-          BUCKET="${{ steps.bucket.outputs.bucket_name }}"
+          BUCKET="${{ steps.vars.outputs.bucket }}"
+          echo "Enabling versioning on bucket: $BUCKET"
+          aws s3api put-bucket-versioning \
+            --bucket "$BUCKET" \
+            --versioning-configuration Status=Enabled
+
+      - name: Upload files to bucket
+        run: |
+          BUCKET="${{ steps.vars.outputs.bucket }}"
+          echo "Uploading Jenkinsfile to S3 bucket: $BUCKET"
+          aws s3 cp "Jenkinsfile" "s3://$BUCKET/"
+
+      - name: List bucket contents
+        run: |
+          BUCKET="${{ steps.vars.outputs.bucket }}"
           aws s3 ls "s3://$BUCKET/"
