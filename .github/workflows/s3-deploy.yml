@@ -29,11 +29,10 @@ jobs:
       - name: Generate unique bucket name
         id: bucket
         run: |
-          # S3 bucket names must be globally unique
-          BUCKET="shamlin-${GITHUB_REPOSITORY_OWNER,,}-${GITHUB_REPOSITORY#*/}-${GITHUB_RUN_NUMBER}"
-          BUCKET="${BUCKET//_/-}"  # replace any underscores with dashes
-          echo "Bucket name: $BUCKET"
+          REPO_SHORT=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | cut -c1-20)
+          BUCKET="shamlin-${REPO_SHORT}-${GITHUB_RUN_NUMBER}"
           echo "bucket_name=$BUCKET" >> $GITHUB_OUTPUT
+      
 
       - name: Create S3 bucket
         run: |
