@@ -57,7 +57,7 @@
 
 
 
-name: Conditional S3 Bucket Deployment (Self-Hosted)
+name: Conditionalin
 
 on:
   push:
