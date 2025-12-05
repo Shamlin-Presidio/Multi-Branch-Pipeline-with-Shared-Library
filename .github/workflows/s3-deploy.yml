@@ -1,0 +1,54 @@
+name: S3 Bucket Deploy (Self-Hosted)
+
+on:
+  push:
+    branches:
+      - main  
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  s3-deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Print runner info
+        run: |
+          echo "Running on host:"
+          hostname
+          echo "Current branch: $GITHUB_REF_NAME"
+          echo "Using region: $AWS_REGION"
+
+      - name: Generate unique bucket name
+        id: bucket
+        run: |
+          # S3 bucket names must be globally unique
+          BUCKET="shamlin-${GITHUB_REPOSITORY_OWNER,,}-${GITHUB_REPOSITORY#*/}-${GITHUB_RUN_NUMBER}"
+          BUCKET="${BUCKET//_/-}"  # replace any underscores with dashes
+          echo "Bucket name: $BUCKET"
+          echo "bucket_name=$BUCKET" >> $GITHUB_OUTPUT
+
+      - name: Create S3 bucket
+        run: |
+          BUCKET="${{ steps.bucket.outputs.bucket_name }}"
+          echo "Creating bucket: $BUCKET"
+          aws s3 mb "s3://$BUCKET" --region "$AWS_REGION"
+
+      - name: Upload file to S3
+        run: |
+          BUCKET="${{ steps.bucket.outputs.bucket_name }}"
+          FILE_PATH="Jenkinsfile"
+          echo "Uploading $FILE_PATH to s3://$BUCKET/"
+          aws s3 cp "$FILE_PATH" "s3://$BUCKET/"
+
+      - name: List objects in bucket
+        run: |
+          BUCKET="${{ steps.bucket.outputs.bucket_name }}"
+          aws s3 ls "s3://$BUCKET/"
